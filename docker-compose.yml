@@ -81,7 +81,9 @@ services:
       - ./app_data:/app_data
     environment:
       - CAN_CHANGE_KEYS=${CAN_CHANGE_KEYS}
-      - LLM=${LLM}
+      - LLM=openai
+      - IMAGE_PROVIDER=pixabay
+      - PIXABAY_API_KEY=52773287-38eabc43244530dac71c7b95e
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_MODEL=${OPENAI_MODEL}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
@@ -93,7 +95,6 @@ services:
       - CUSTOM_LLM_URL=${CUSTOM_LLM_URL}
       - CUSTOM_LLM_API_KEY=${CUSTOM_LLM_API_KEY}
       - CUSTOM_MODEL=${CUSTOM_MODEL}
-      - PEXELS_API_KEY=${PEXELS_API_KEY}
       - EXTENDED_REASONING=${EXTENDED_REASONING}
       - TOOL_CALLS=${TOOL_CALLS}
       - DISABLE_THINKING=${DISABLE_THINKING}

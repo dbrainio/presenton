@@ -1,16 +1,42 @@
 FROM python:3.11-slim-bookworm
 
+# Disable proxies inside build to avoid "connecting to 127.0.0.1:3067" during apt/curl
+ARG http_proxy
+ARG https_proxy
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ENV http_proxy=
+ENV https_proxy=
+ENV HTTP_PROXY=
+ENV HTTPS_PROXY=
+RUN printf 'Acquire::http::Proxy "false";\nAcquire::https::Proxy "false";\n' > /etc/apt/apt.conf.d/99disable-proxy
+
 # Install Node.js and npm
-RUN apt-get update && apt-get install -y \
+RUN apt-get -o Acquire::http::Proxy=false -o Acquire::https::Proxy=false update && \
+  apt-get -o Acquire::http::Proxy=false -o Acquire::https::Proxy=false install -y \
   nginx \
   curl \
   libreoffice \
   fontconfig \
-  chromium
+  chromium \
+  xz-utils
 
-# Install Node.js 20 using NodeSource repository
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-  apt-get install -y nodejs
+# Install Node.js 20 from official tarball (avoids NodeSource network issues)
+ARG NODE_VERSION=20.18.0
+RUN set -eux; \
+  arch="$(dpkg --print-architecture)"; \
+  case "$arch" in \
+    amd64) nodeArch="x64" ;; \
+    arm64) nodeArch="arm64" ;; \
+    armhf) nodeArch="armv7l" ;; \
+    *) echo "Unsupported architecture: $arch" && exit 1 ;; \
+  esac; \
+  curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${nodeArch}.tar.xz" -o node.tar.xz; \
+  tar -xJf node.tar.xz -C /usr/local --strip-components=1; \
+  rm node.tar.xz; \
+  ln -sf /usr/local/bin/node /usr/bin/node; \
+  ln -sf /usr/local/bin/npm /usr/bin/npm; \
+  ln -sf /usr/local/bin/npx /usr/bin/npx
 
 
 # Change working directory
@@ -29,8 +55,18 @@ RUN curl -fsSL http://ollama.com/install.sh | sh
 # Install dependencies for FastAPI
 RUN pip install aiohttp aiomysql aiosqlite asyncpg fastapi[standard] \
   pathvalidate pdfplumber chromadb sqlmodel \
-  anthropic google-genai openai fastmcp dirtyjson
-RUN pip install docling --extra-index-url https://download.pytorch.org/whl/cpu
+  anthropic google-genai openai fastmcp dirtyjson python-pptx docling
+
+# Pre-install CPU-only PyTorch stack to avoid pulling CUDA dependencies
+# ENV PIP_DEFAULT_TIMEOUT=100
+# RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
+#   torch==2.4.1+cpu torchvision==0.19.1+cpu torchaudio==2.4.1+cpu
+
+# # Install docling without upgrading pinned torch/torchvision/torchaudio
+# RUN printf "torch==2.4.1+cpu\ntelevision==0.19.1+cpu\ntorchaudio==2.4.1+cpu\n" > /tmp/constraints.txt && \
+#   sed -i 's/^television/torchvision/' /tmp/constraints.txt && \
+#   cat /tmp/constraints.txt && \
+#   pip install --no-cache-dir --default-timeout=100 -c /tmp/constraints.txt docling
 
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/nginx.conf
