@@ -1,6 +1,7 @@
 from typing import Annotated, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 import uuid
 
 from models.sql.presentation import PresentationModel
@@ -12,7 +13,6 @@ from utils.llm_calls.edit_slide import get_edited_slide_content
 from utils.llm_calls.edit_slide_html import get_edited_slide_html
 from utils.llm_calls.select_slide_type_on_edit import get_slide_layout_from_prompt
 from utils.process_slides import process_old_and_new_slides_and_fetch_assets
-import uuid
 
 
 SLIDE_ROUTER = APIRouter(prefix="/slide", tags=["Slide"])
@@ -20,16 +20,23 @@ SLIDE_ROUTER = APIRouter(prefix="/slide", tags=["Slide"])
 
 @SLIDE_ROUTER.post("/edit")
 async def edit_slide(
-    id: Annotated[uuid.UUID, Body()],
+    presentation_id: Annotated[uuid.UUID, Body()],
+    slide_index: Annotated[int, Body()],
     prompt: Annotated[str, Body()],
     sql_session: AsyncSession = Depends(get_async_session),
 ):
-    slide = await sql_session.get(SlideModel, id)
-    if not slide:
-        raise HTTPException(status_code=404, detail="Slide not found")
-    presentation = await sql_session.get(PresentationModel, slide.presentation)
+    presentation = await sql_session.get(PresentationModel, presentation_id)
     if not presentation:
         raise HTTPException(status_code=404, detail="Presentation not found")
+
+    slide_result = await sql_session.scalars(
+        select(SlideModel).where(
+            (SlideModel.presentation == presentation_id) & (SlideModel.index == slide_index)
+        )
+    )
+    slide = slide_result.first()
+    if not slide:
+        raise HTTPException(status_code=404, detail="Slide not found")
 
     presentation_layout = presentation.get_layout()
     slide_layout = await get_slide_layout_from_prompt(
