@@ -13,6 +13,7 @@ from utils.llm_calls.edit_slide import get_edited_slide_content
 from utils.llm_calls.edit_slide_html import get_edited_slide_html
 from utils.llm_calls.select_slide_type_on_edit import get_slide_layout_from_prompt
 from utils.process_slides import process_old_and_new_slides_and_fetch_assets
+from models.presentation_with_slides import PresentationWithSlides
 
 
 SLIDE_ROUTER = APIRouter(prefix="/slide", tags=["Slide"])
@@ -95,3 +96,77 @@ async def edit_slide_html(
     await sql_session.commit()
 
     return slide
+
+
+@SLIDE_ROUTER.post("/delete", response_model=PresentationWithSlides)
+async def delete_slide(
+    presentation_id: Annotated[uuid.UUID, Body()],
+    slide_index: Annotated[int, Body()],
+    sql_session: AsyncSession = Depends(get_async_session),
+):
+    presentation = await sql_session.get(PresentationModel, presentation_id)
+    if not presentation:
+        raise HTTPException(status_code=404, detail="Presentation not found")
+
+    # Fetch slides count to validate index range
+    slides_result = await sql_session.scalars(
+        select(SlideModel)
+        .where(SlideModel.presentation == presentation_id)
+        .order_by(SlideModel.index)
+    )
+    slides_list = slides_result.all()
+
+    if slide_index < 0 or slide_index >= len(slides_list):
+        raise HTTPException(status_code=400, detail="Slide index out of range")
+
+    # Find the specific slide to delete
+    slide_result = await sql_session.scalars(
+        select(SlideModel).where(
+            (SlideModel.presentation == presentation_id)
+            & (SlideModel.index == slide_index)
+        )
+    )
+    slide_to_delete = slide_result.first()
+    if not slide_to_delete:
+        # Shouldn't happen due to range check, but keeping it safe
+        raise HTTPException(status_code=404, detail="Slide not found")
+
+    # Delete the slide
+    from sqlalchemy import delete as sa_delete
+
+    await sql_session.execute(
+        sa_delete(SlideModel).where(SlideModel.id == slide_to_delete.id)
+    )
+
+    # Reindex subsequent slides to keep indices consistent
+    subsequent_slides_result = await sql_session.scalars(
+        select(SlideModel)
+        .where(
+            (SlideModel.presentation == presentation_id)
+            & (SlideModel.index > slide_index)
+        )
+        .order_by(SlideModel.index)
+    )
+    subsequent_slides = subsequent_slides_result.all()
+    for s in subsequent_slides:
+        s.index = s.index - 1
+        sql_session.add(s)
+
+    # Update presentation's slide count
+    presentation.n_slides = max(0, presentation.n_slides - 1)
+    sql_session.add(presentation)
+
+    await sql_session.commit()
+
+    # Return updated presentation with slides like get_presentation
+    updated_slides_result = await sql_session.scalars(
+        select(SlideModel)
+        .where(SlideModel.presentation == presentation_id)
+        .order_by(SlideModel.index)
+    )
+    updated_slides = updated_slides_result.all()
+
+    return PresentationWithSlides(
+        **presentation.model_dump(),
+        slides=updated_slides,
+    )
