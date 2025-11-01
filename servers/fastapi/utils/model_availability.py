@@ -16,6 +16,7 @@ from utils.get_env import (
     get_openai_model_env,
     get_pixabay_api_key_env,
     get_pexels_api_key_env,
+    get_ideogram_api_key_env,
 )
 from utils.get_env import get_google_api_key_env
 from utils.get_env import get_ollama_model_env
@@ -128,3 +129,8 @@ async def check_llm_and_image_provider_api_or_model_availability():
             openai_api_key = get_openai_api_key_env()
             if not openai_api_key:
                 raise Exception("OPENAI_API_KEY must be provided")
+
+        elif selected_image_provider == ImageProvider.IDEOGRAM:
+            ideogram_api_key = get_ideogram_api_key_env()
+            if not ideogram_api_key:
+                raise Exception("IDEOGRAM_API_KEY must be provided")

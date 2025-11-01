@@ -9,11 +9,13 @@ from models.sql.image_asset import ImageAsset
 from utils.download_helpers import download_file
 from utils.get_env import get_pexels_api_key_env
 from utils.get_env import get_pixabay_api_key_env
+from utils.get_env import get_ideogram_api_key_env
 from utils.image_provider import (
     is_pixels_selected,
     is_pixabay_selected,
     is_gemini_flash_selected,
     is_dalle3_selected,
+    is_ideogram_selected,
 )
 import uuid
 
@@ -33,6 +35,8 @@ class ImageGenerationService:
             return self.generate_image_google
         elif is_dalle3_selected():
             return self.generate_image_openai
+        elif is_ideogram_selected():
+            return self.get_image_from_ideogram
         return None
 
     def is_stock_provider_selected(self):
@@ -110,6 +114,42 @@ class ImageGenerationService:
                     f.write(part.inline_data.data)
 
         return image_path
+
+    async def get_image_from_ideogram(self, prompt: str, output_directory: str) -> str:
+        api_key = get_ideogram_api_key_env()
+        if not api_key:
+            raise Exception("IDEOGRAM_API_KEY must be provided")
+
+        url = "https://api.ideogram.ai/v1/ideogram-v3/generate"
+        headers = {
+            "Api-Key": api_key,
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "prompt": prompt,
+            "rendering_speed": "DEFAULT",
+            "aspect_ratio": "1x1",
+        }
+
+        async with aiohttp.ClientSession(trust_env=True) as session:
+            response = await session.post(url, headers=headers, json=payload)
+            if response.status >= 400:
+                text = await response.text()
+                raise Exception(f"Ideogram API error {response.status}: {text}")
+            data = await response.json()
+
+        image_url = None
+        try:
+            if isinstance(data, dict) and "data" in data and data["data"]:
+                first = data["data"][0]
+                image_url = first.get("url") or first.get("image_url") or first.get("imageUrl")
+        except Exception:
+            image_url = None
+
+        if not image_url:
+            raise Exception("Ideogram API did not return an image URL")
+
+        return await download_file(image_url, output_directory)
 
     async def get_image_from_pexels(self, prompt: str) -> str:
         async with aiohttp.ClientSession(trust_env=True) as session:
