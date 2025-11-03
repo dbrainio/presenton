@@ -51,12 +51,15 @@ async def stream_outlines(
 
         presentation_outlines_text = ""
 
+        print(f"presentation.n_slides до изменения: {presentation.n_slides}")
+
         n_slides_to_generate = presentation.n_slides
-        if presentation.include_table_of_contents:
-            needed_toc_count = math.ceil((presentation.n_slides - 1) / 10)
-            n_slides_to_generate -= math.ceil(
-                (presentation.n_slides - needed_toc_count) / 10
-            )
+        # Do not use this for now, it's not working as expected
+        # if presentation.include_table_of_contents:
+        #     needed_toc_count = math.ceil((presentation.n_slides - 1) / 10)
+        #     n_slides_to_generate -= math.ceil(
+        #         (presentation.n_slides - needed_toc_count) / 10
+        #     )
 
         async for chunk in generate_ppt_outline(
             presentation.content,
