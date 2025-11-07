@@ -361,6 +361,81 @@ async def stream_presentation(
     return StreamingResponse(inner(), media_type="text/event-stream")
 
 
+@PRESENTATION_ROUTER.get("/build/{id}", response_model=PresentationWithSlides)
+async def build_presentation(
+    id: uuid.UUID, sql_session: AsyncSession = Depends(get_async_session)
+):
+    presentation = await sql_session.get(PresentationModel, id)
+    if not presentation:
+        raise HTTPException(status_code=404, detail="Presentation not found")
+    if not presentation.structure:
+        raise HTTPException(
+            status_code=400,
+            detail="Presentation not prepared for build",
+        )
+    if not presentation.outlines:
+        raise HTTPException(
+            status_code=400,
+            detail="Outlines can not be empty",
+        )
+
+    image_generation_service = ImageGenerationService(get_images_directory())
+
+    structure = presentation.get_structure()
+    layout = presentation.get_layout()
+    outline = presentation.get_presentation_outline()
+
+    async_assets_generation_tasks = []
+    slides: List[SlideModel] = []
+
+    for i, slide_layout_index in enumerate(structure.slides):
+        slide_layout = layout.slides[slide_layout_index]
+
+        slide_content = await get_slide_content_from_type_and_outline(
+            slide_layout,
+            outline.slides[i],
+            presentation.language,
+            presentation.tone,
+            presentation.verbosity,
+            presentation.instructions,
+        )
+
+        slide = SlideModel(
+            presentation=id,
+            layout_group=layout.name,
+            layout=slide_layout.id,
+            index=i,
+            speaker_note=slide_content.get("__speaker_note__", ""),
+            content=slide_content,
+        )
+        slides.append(slide)
+
+        # Add placeholders and schedule asset generation
+        process_slide_add_placeholder_assets(slide)
+        async_assets_generation_tasks.append(
+            process_slide_and_fetch_assets(image_generation_service, slide)
+        )
+
+    generated_assets_lists = await asyncio.gather(*async_assets_generation_tasks)
+    generated_assets = []
+    for assets_list in generated_assets_lists:
+        generated_assets.extend(assets_list)
+
+    # Replace existing slides atomically
+    await sql_session.execute(delete(SlideModel).where(SlideModel.presentation == id))
+    await sql_session.commit()
+
+    sql_session.add(presentation)
+    sql_session.add_all(slides)
+    sql_session.add_all(generated_assets)
+    await sql_session.commit()
+
+    return PresentationWithSlides(
+        **presentation.model_dump(),
+        slides=slides,
+    )
+
+
 @PRESENTATION_ROUTER.patch("/update", response_model=PresentationWithSlides)
 async def update_presentation(
     id: Annotated[uuid.UUID, Body()],
