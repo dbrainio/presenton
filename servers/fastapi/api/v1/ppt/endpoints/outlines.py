@@ -114,3 +114,64 @@ async def stream_outlines(
         ).to_string()
 
     return StreamingResponse(inner(), media_type="text/event-stream")
+
+
+@OUTLINES_ROUTER.get("/create/{id}", response_model=PresentationModel)
+async def create_outlines(
+    id: uuid.UUID, sql_session: AsyncSession = Depends(get_async_session)
+):
+    presentation = await sql_session.get(PresentationModel, id)
+
+    if not presentation:
+        raise HTTPException(status_code=404, detail="Presentation not found")
+
+    temp_dir = TEMP_FILE_SERVICE.create_temp_dir()
+
+    additional_context = ""
+    if presentation.file_paths:
+        documents_loader = DocumentsLoader(file_paths=presentation.file_paths)
+        await documents_loader.load_documents(temp_dir)
+        documents = documents_loader.documents
+        if documents:
+            additional_context = "\n\n".join(documents)
+
+    presentation_outlines_text = ""
+
+    n_slides_to_generate = presentation.n_slides
+
+    async for chunk in generate_ppt_outline(
+        presentation.content,
+        n_slides_to_generate,
+        presentation.language,
+        additional_context,
+        presentation.tone,
+        presentation.verbosity,
+        presentation.instructions,
+        presentation.include_title_slide,
+        presentation.web_search,
+    ):
+        if isinstance(chunk, HTTPException):
+            raise chunk
+
+        presentation_outlines_text += chunk
+
+    try:
+        presentation_outlines_json = dict(dirtyjson.loads(presentation_outlines_text))
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to generate presentation outlines. Please try again. {str(e)}",
+        )
+
+    presentation_outlines = PresentationOutlineModel(**presentation_outlines_json)
+
+    presentation_outlines.slides = presentation_outlines.slides[:n_slides_to_generate]
+
+    presentation.outlines = presentation_outlines.model_dump()
+    presentation.title = get_presentation_title_from_outlines(presentation_outlines)
+
+    sql_session.add(presentation)
+    await sql_session.commit()
+
+    return presentation
