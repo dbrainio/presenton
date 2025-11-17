@@ -8,7 +8,7 @@ import traceback
 from typing import Annotated, List, Literal, Optional, Tuple
 import dirtyjson
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -494,7 +494,18 @@ async def export_presentation_as_pptx(
     return pptx_path
 
 
-@PRESENTATION_ROUTER.post("/export", response_model=PresentationPathAndEditPath)
+@PRESENTATION_ROUTER.post(
+    "/export",
+    responses={
+        200: {
+            "content": {
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation": {},
+                "application/pdf": {},
+            },
+            "description": "Exported presentation file",
+        }
+    },
+)
 async def export_presentation_as_pptx_or_pdf(
     id: Annotated[uuid.UUID, Body(description="Presentation ID to export")],
     export_as: Annotated[
@@ -502,6 +513,9 @@ async def export_presentation_as_pptx_or_pdf(
     ] = "pptx",
     sql_session: AsyncSession = Depends(get_async_session),
 ):
+    """
+    Export a presentation as a PPTX or PDF file and return it directly over HTTP.
+    """
     presentation = await sql_session.get(PresentationModel, id)
 
     if not presentation:
@@ -513,9 +527,26 @@ async def export_presentation_as_pptx_or_pdf(
         export_as,
     )
 
-    return PresentationPathAndEditPath(
-        **presentation_and_path.model_dump(),
-        edit_path=f"/presentation?id={id}",
+    file_path = presentation_and_path.path
+
+    media_type = (
+        "application/pdf"
+        if export_as == "pdf"
+        else "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    )
+
+    filename = os.path.basename(file_path)
+
+    if not os.path.exists(file_path):
+        raise HTTPException(
+            status_code=500,
+            detail=f"Exported file not found on server: {file_path}",
+        )
+
+    return FileResponse(
+        path=file_path,
+        media_type=media_type,
+        filename=filename,
     )
 
 
