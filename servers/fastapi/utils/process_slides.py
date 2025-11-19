@@ -152,6 +152,7 @@ async def process_old_and_new_slides_and_fetch_assets(
             fetched_image = new_images[i]
             if isinstance(fetched_image, ImageAsset):
                 new_assets.append(fetched_image)
+                # Use the local path for rendering; s3_url may not be publicly accessible.
                 image_url = fetched_image.path
             else:
                 image_url = fetched_image

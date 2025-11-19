@@ -15,6 +15,8 @@ class ImageAsset(SQLModel, table=True):
             DateTime(timezone=True), nullable=False, default=get_current_utc_datetime
         ),
     )
+    # Indicates whether the image has been uploaded to object storage (S3/MinIO)
     is_uploaded: bool = Field(default=False)
     path: str
+    s3_url: Optional[str] = None
     extras: Optional[dict] = Field(sa_column=Column(JSON), default=None)

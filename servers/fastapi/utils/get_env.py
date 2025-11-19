@@ -99,3 +99,29 @@ def get_web_grounding_env():
 
 def get_ideogram_api_key_env():
     return os.getenv("IDEOGRAM_API_KEY")
+
+
+# Object storage / S3 (MinIO) settings
+def get_object_storage_endpoint_env():
+    return os.getenv("OBJECT_STORAGE_ENDPOINT")
+
+
+def get_object_storage_prefix_env():
+    return os.getenv("OBJECT_STORAGE_PREFIX")
+
+
+def get_object_storage_region_env():
+    # Region is required by some S3 clients but often ignored by MinIO
+    return os.getenv("OBJECT_STORAGE_REGION") or "us-east-1"
+
+
+def get_object_storage_bucket_name_env():
+    return os.getenv("OBJECT_STORAGE_BUCKET_NAME")
+
+
+def get_object_storage_access_key_id_env():
+    return os.getenv("OBJECT_STORAGE_ACCESS_KEY_ID")
+
+
+def get_object_storage_secret_access_key_env():
+    return os.getenv("OBJECT_STORAGE_SECRET_ACCESS_KEY")

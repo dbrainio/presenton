@@ -1,21 +1,19 @@
 import os
 from typing import List, Optional
-from lxml import etree
-from services.html_to_text_runs_service import (
-    parse_html_text_to_text_runs as parse_inline_html_to_runs,
-)
 
-from pptx import Presentation
-from pptx.shapes.autoshape import Shape
-from pptx.slide import Slide
-from pptx.text.text import _Paragraph, TextFrame, Font, _Run
-from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+from lxml import etree
 from lxml.etree import fromstring, tostring
 from PIL import Image
-from pptx.oxml.xmlchemy import OxmlElement
+from sqlalchemy import select
 
-from pptx.util import Pt
+from pptx import Presentation
 from pptx.dml.color import RGBColor
+from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+from pptx.oxml.xmlchemy import OxmlElement
+from pptx.shapes.autoshape import Shape
+from pptx.slide import Slide
+from pptx.text.text import Font, TextFrame, _Paragraph, _Run
+from pptx.util import Pt
 
 from models.pptx_models import (
     PptxAutoShapeBoxModel,
@@ -34,6 +32,11 @@ from models.pptx_models import (
     PptxTextBoxModel,
     PptxTextRunModel,
 )
+from models.sql.image_asset import ImageAsset
+from services.database import async_session_maker
+from services.html_to_text_runs_service import (
+    parse_html_text_to_text_runs as parse_inline_html_to_runs,
+)
 from utils.download_helpers import download_files
 from utils.image_utils import (
     clip_image,
@@ -43,6 +46,7 @@ from utils.image_utils import (
     round_image_corners,
     set_image_opacity,
 )
+from utils.s3_utils import download_file_from_s3
 import uuid
 
 BLANK_SLIDE_LAYOUT = 6
@@ -119,7 +123,7 @@ class PptxPresentationCreator:
             if self._ppt_model.shapes:
                 slide_model.shapes.append(self._ppt_model.shapes)
 
-            self.add_and_populate_slide(slide_model)
+            await self.add_and_populate_slide(slide_model)
 
     def set_presentation_theme(self):
         slide_master = self._ppt.slide_master
@@ -141,7 +145,7 @@ class PptxPresentationCreator:
 
         theme_part._blob = tostring(theme)
 
-    def add_and_populate_slide(self, slide_model: PptxSlideModel):
+    async def add_and_populate_slide(self, slide_model: PptxSlideModel):
         slide = self._ppt.slides.add_slide(self._ppt.slide_layouts[BLANK_SLIDE_LAYOUT])
 
         if slide_model.background:
@@ -154,7 +158,7 @@ class PptxPresentationCreator:
             model_type = type(shape_model)
 
             if model_type is PptxPictureBoxModel:
-                self.add_picture(slide, shape_model)
+                await self.add_picture(slide, shape_model)
 
             elif model_type is PptxAutoShapeBoxModel:
                 self.add_autoshape(slide, shape_model)
@@ -175,8 +179,52 @@ class PptxPresentationCreator:
         connector_shape.line.color.rgb = RGBColor.from_string(connector_model.color)
         self.set_fill_opacity(connector_shape, connector_model.opacity)
 
-    def add_picture(self, slide: Slide, picture_model: PptxPictureBoxModel):
+    async def _restore_image_from_s3_if_missing(self, image_path: str) -> Optional[str]:
+        """
+        Try to restore a missing local image by looking up its S3 object key
+        in the ImageAsset table (by path) and downloading it to the same path.
+        """
+        if not image_path:
+            return None
+
+        if os.path.exists(image_path):
+            return image_path
+
+        try:
+            async with async_session_maker() as session:
+                result = await session.execute(
+                    select(ImageAsset).where(ImageAsset.path == image_path)
+                )
+                asset = result.scalar_one_or_none()
+        except Exception as e:
+            print(f"Error fetching ImageAsset for {image_path}: {e}")
+            return None
+
+        if not asset or not asset.s3_url:
+            return None
+
+        try:
+            restored_path = await download_file_from_s3(asset.s3_url, image_path)
+            if not restored_path:
+                print(
+                    f"ImageAsset found but failed to download from S3 for {image_path}"
+                )
+            return restored_path
+        except Exception as e:
+            print(f"Error downloading image from S3 for {image_path}: {e}")
+            return None
+
+    async def add_picture(self, slide: Slide, picture_model: PptxPictureBoxModel):
         image_path = picture_model.picture.path
+
+        # Ensure the image exists locally; if not, try to restore it from S3
+        if not os.path.exists(image_path):
+            restored_path = await self._restore_image_from_s3_if_missing(image_path)
+            if not restored_path:
+                print(f"Could not find or restore image: {image_path}")
+                return
+            image_path = restored_path
+
         if (
             picture_model.clip
             or picture_model.border_radius
@@ -187,8 +235,8 @@ class PptxPresentationCreator:
         ):
             try:
                 image = Image.open(image_path)
-            except:
-                print(f"Could not open image: {image_path}")
+            except Exception as e:
+                print(f"Could not open image: {image_path}. Error: {e}")
                 return
 
             image = image.convert("RGBA")

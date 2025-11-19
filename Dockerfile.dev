@@ -55,7 +55,7 @@ RUN curl -fsSL http://ollama.com/install.sh | sh
 # Install dependencies for FastAPI
 RUN pip install aiohttp aiomysql aiosqlite asyncpg fastapi[standard] \
   pathvalidate pdfplumber chromadb sqlmodel \
-  anthropic google-genai openai fastmcp dirtyjson python-pptx docling
+  anthropic google-genai openai fastmcp dirtyjson python-pptx docling boto3>=1.35.0
 
 # Pre-install CPU-only PyTorch stack to avoid pulling CUDA dependencies
 # ENV PIP_DEFAULT_TIMEOUT=100

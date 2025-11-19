@@ -1,0 +1,131 @@
+import asyncio
+import mimetypes
+import os
+from typing import Optional
+
+import boto3
+from botocore.client import Config
+
+from utils.get_env import (
+    get_object_storage_access_key_id_env,
+    get_object_storage_bucket_name_env,
+    get_object_storage_endpoint_env,
+    get_object_storage_prefix_env,
+    get_object_storage_region_env,
+    get_object_storage_secret_access_key_env,
+)
+
+_s3_client = None
+
+
+def _build_s3_client():
+    endpoint = get_object_storage_endpoint_env()
+    access_key = get_object_storage_access_key_id_env()
+    secret_key = get_object_storage_secret_access_key_env()
+    region = get_object_storage_region_env()
+
+    if not endpoint or not access_key or not secret_key:
+        # S3 is not configured – caller should handle this case.
+        return None
+
+    return boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name=region,
+        config=Config(s3={"addressing_style": "path"}),
+    )
+
+
+def get_s3_client():
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = _build_s3_client()
+    return _s3_client
+
+
+def _upload_file_to_s3_sync(local_path: str) -> Optional[str]:
+    """
+    Synchronous helper that uploads a file to S3 and returns the object key
+    (prefix + filename) that can later be used to download it again.
+
+    Returns:
+        The object key of the uploaded file or None if uploading is disabled
+        or any configuration is missing.
+    """
+    client = get_s3_client()
+    bucket = get_object_storage_bucket_name_env()
+
+    if client is None or not bucket:
+        return None
+
+    filename = os.path.basename(local_path)
+    prefix = get_object_storage_prefix_env() or ""
+
+    # Ensure we upload into the desired folder (e.g. api/presentation/images)
+    if prefix:
+        prefix = prefix.strip("/")
+        key = f"{prefix}/{filename}"
+    else:
+        key = filename
+
+    extra_args = {}
+    content_type, _ = mimetypes.guess_type(local_path)
+    if content_type:
+        extra_args["ContentType"] = content_type
+
+    client.upload_file(local_path, bucket, key, ExtraArgs=extra_args or None)
+
+    # We store and return only the S3 object key (prefix/filename), not a public URL.
+    return key
+
+
+async def upload_file_to_s3(local_path: str) -> Optional[str]:
+    """
+    Asynchronously upload a local file to S3/MinIO and return its object key.
+
+    If S3 is not configured or upload fails, returns None so callers can fall
+    back to existing filesystem-based behavior.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _upload_file_to_s3_sync, local_path)
+    except Exception as e:
+        print(f"Error uploading file to S3: {e}")
+        return None
+
+
+def _download_file_from_s3_sync(object_key: str, local_path: str) -> Optional[str]:
+    """
+    Synchronous helper that downloads an object from S3 using its key into
+    the specified local_path.
+
+    Returns:
+        The local_path of the downloaded file, or None if downloading is
+        disabled or fails.
+    """
+    client = get_s3_client()
+    bucket = get_object_storage_bucket_name_env()
+
+    if client is None or not bucket:
+        return None
+
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    client.download_file(bucket, object_key, local_path)
+    return local_path
+
+
+async def download_file_from_s3(object_key: str, local_path: str) -> Optional[str]:
+    """
+    Asynchronously download an object from S3/MinIO by its key into the given
+    local_path.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, _download_file_from_s3_sync, object_key, local_path
+        )
+    except Exception as e:
+        print(f"Error downloading file from S3: {e}")
+        return None

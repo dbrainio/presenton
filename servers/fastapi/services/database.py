@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator
 import os
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     create_async_engine,
@@ -65,6 +66,11 @@ async def create_db_and_tables():
                     AsyncPresentationGenerationTaskModel.__table__,
                 ],
             )
+        )
+        # Lightweight migration: ensure new nullable columns exist on existing tables.
+        # This is safe to run repeatedly thanks to IF NOT EXISTS.
+        await conn.execute(
+            text("ALTER TABLE imageasset ADD COLUMN IF NOT EXISTS s3_url VARCHAR")
         )
 
     async with container_db_engine.begin() as conn:

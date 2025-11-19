@@ -17,6 +17,7 @@ from utils.image_provider import (
     is_dalle3_selected,
     is_ideogram_selected,
 )
+from utils.s3_utils import upload_file_to_s3
 import uuid
 
 
@@ -66,19 +67,40 @@ class ImageGenerationService:
                 image_path = await self.image_gen_func(
                     image_prompt, self.output_directory
                 )
+
             if image_path:
+                # If provider already returns an HTTP URL (e.g. Pexels/Pixabay),
+                # just return it as-is.
                 if image_path.startswith("http"):
                     return image_path
                 elif os.path.exists(image_path):
+                    # For locally generated images, upload to S3/MinIO (when configured)
+                    # and return an ImageAsset that keeps both the local path and S3 key.
+                    s3_key = await upload_file_to_s3(image_path)
+                    if not s3_key:
+                        raise Exception("Failed to upload generated image to S3")
+                    print(f"Image uploaded to S3: {s3_key}")
+
                     return ImageAsset(
                         path=image_path,
-                        is_uploaded=False,
+                        is_uploaded=True,
+                        s3_url=s3_key,
                         extras={
                             "prompt": prompt.prompt,
                             "theme_prompt": prompt.theme_prompt,
                         },
                     )
-            raise Exception(f"Image not found at {image_path}")
+
+                # # For locally generated images, upload to S3/MinIO when configured.
+                # if os.path.exists(image_path):
+                #     s3_url = await upload_file_to_s3(image_path)
+                #     if s3_url:
+                #         # Return S3 URL in the same way as stock providers.
+                #         return s3_url
+
+            # If we reach this point, either no path was returned, the file does
+            # not exist, or the upload failed.
+            raise Exception(f"Image not found or upload failed for {image_path}")
 
         except Exception as e:
             print(f"Error generating image: {e}")
@@ -142,7 +164,9 @@ class ImageGenerationService:
         try:
             if isinstance(data, dict) and "data" in data and data["data"]:
                 first = data["data"][0]
-                image_url = first.get("url") or first.get("image_url") or first.get("imageUrl")
+                image_url = (
+                    first.get("url") or first.get("image_url") or first.get("imageUrl")
+                )
         except Exception:
             image_url = None
 
