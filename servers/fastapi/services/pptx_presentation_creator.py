@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from lxml import etree
 from lxml.etree import fromstring, tostring
@@ -63,6 +63,10 @@ class PptxPresentationCreator:
         self._ppt = Presentation()
         self._ppt.slide_width = Pt(1280)
         self._ppt.slide_height = Pt(720)
+
+        # Track all image file paths used while building the presentation so we can
+        # clean them up once the PPTX is saved.
+        self._used_image_paths: Set[str] = set()
 
     def get_sub_element(self, parent, tagname, **kwargs):
         """Helper method to create XML elements"""
@@ -214,6 +218,13 @@ class PptxPresentationCreator:
             print(f"Error downloading image from S3 for {image_path}: {e}")
             return None
 
+    def _register_image_path(self, image_path: Optional[str]):
+        """
+        Remember an image path so it can be deleted after the presentation is saved.
+        """
+        if image_path:
+            self._used_image_paths.add(image_path)
+
     async def add_picture(self, slide: Slide, picture_model: PptxPictureBoxModel):
         image_path = picture_model.picture.path
 
@@ -224,6 +235,10 @@ class PptxPresentationCreator:
                 print(f"Could not find or restore image: {image_path}")
                 return
             image_path = restored_path
+
+        # Track the resolved source image path (could be a restored S3 asset
+        # or a previously downloaded/local file).
+        source_image_path = image_path
 
         if (
             picture_model.clip
@@ -266,6 +281,11 @@ class PptxPresentationCreator:
                 image = set_image_opacity(image, picture_model.opacity)
             image_path = os.path.join(self._temp_dir, f"{uuid.uuid4()}.png")
             image.save(image_path)
+
+        # Register both the original/resolved source and any processed temp image.
+        self._register_image_path(source_image_path)
+        if image_path != source_image_path:
+            self._register_image_path(image_path)
 
         margined_position = self.get_margined_position(
             picture_model.position, picture_model.margin
@@ -526,5 +546,19 @@ class PptxPresentationCreator:
         except Exception as e:
             print(f"Could not apply strikethrough: {e}")
 
+    def _cleanup_images(self):
+        """
+        Delete all image files that were used while generating this presentation.
+        """
+        for image_path in list(self._used_image_paths):
+            try:
+                if image_path and os.path.exists(image_path):
+                    os.remove(image_path)
+            except Exception as e:
+                print(f"Could not delete image {image_path}: {e}")
+        self._used_image_paths.clear()
+
     def save(self, path: str):
         self._ppt.save(path)
+        # After the PPTX file is created, remove all images that were used.
+        self._cleanup_images()

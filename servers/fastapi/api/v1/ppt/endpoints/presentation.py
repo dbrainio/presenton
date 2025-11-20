@@ -512,6 +512,7 @@ async def export_presentation_as_pptx_or_pdf(
         Literal["pptx", "pdf"], Body(description="Format to export the presentation as")
     ] = "pptx",
     sql_session: AsyncSession = Depends(get_async_session),
+    background_tasks: BackgroundTasks = None,
 ):
     """
     Export a presentation as a PPTX or PDF file and return it directly over HTTP.
@@ -543,10 +544,17 @@ async def export_presentation_as_pptx_or_pdf(
             detail=f"Exported file not found on server: {file_path}",
         )
 
+    if background_tasks is None:
+        background_tasks = BackgroundTasks()
+
+    # Schedule deletion of the exported file after the response is completed
+    background_tasks.add_task(os.remove, file_path)
+
     return FileResponse(
         path=file_path,
         media_type=media_type,
         filename=filename,
+        background=background_tasks,
     )
 
 
