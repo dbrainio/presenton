@@ -17,7 +17,10 @@ from utils.process_slides import (
     process_slide_and_fetch_assets,
 )
 from models.presentation_with_slides import PresentationWithSlides
-from models.presentation_outline_model import PresentationOutlineModel, SlideOutlineModel
+from models.presentation_outline_model import (
+    PresentationOutlineModel,
+    SlideOutlineModel,
+)
 from utils.llm_calls.generate_presentation_structure import (
     generate_presentation_structure,
 )
@@ -42,7 +45,8 @@ async def edit_slide(
 
     slide_result = await sql_session.scalars(
         select(SlideModel).where(
-            (SlideModel.presentation == presentation_id) & (SlideModel.index == slide_index)
+            (SlideModel.presentation == presentation_id)
+            & (SlideModel.index == slide_index)
         )
     )
     slide = slide_result.first()
@@ -63,7 +67,7 @@ async def edit_slide(
     # This will mutate edited_slide_content
     new_assets = await process_old_and_new_slides_and_fetch_assets(
         image_generation_service,
-        slide.content,
+        slide,
         edited_slide_content,
     )
 

@@ -45,10 +45,13 @@ def get_s3_client():
     return _s3_client
 
 
-def _upload_file_to_s3_sync(local_path: str) -> Optional[str]:
+def _upload_file_to_s3_sync(
+    local_path: str,
+    postfix: Optional[str] = None,
+) -> Optional[str]:
     """
     Synchronous helper that uploads a file to S3 and returns the object key
-    (prefix + filename) that can later be used to download it again.
+    (prefix[/postfix]/filename) that can later be used to download it again.
 
     Returns:
         The object key of the uploaded file or None if uploading is disabled
@@ -61,14 +64,18 @@ def _upload_file_to_s3_sync(local_path: str) -> Optional[str]:
         return None
 
     filename = os.path.basename(local_path)
-    prefix = get_object_storage_prefix_env() or ""
+    base_prefix = get_object_storage_prefix_env() or ""
 
-    # Ensure we upload into the desired folder (e.g. api/presentation/images)
-    if prefix:
-        prefix = prefix.strip("/")
-        key = f"{prefix}/{filename}"
-    else:
-        key = filename
+    # Build key like: <base_prefix>/<postfix>/<filename>
+    # If either base_prefix or postfix are missing, they are simply skipped.
+    key_parts = []
+    if base_prefix:
+        key_parts.append(base_prefix.strip("/"))
+    if postfix:
+        key_parts.append(str(postfix).strip("/"))
+    key_parts.append(filename)
+
+    key = "/".join(key_parts)
 
     extra_args = {}
     content_type, _ = mimetypes.guess_type(local_path)
@@ -77,11 +84,14 @@ def _upload_file_to_s3_sync(local_path: str) -> Optional[str]:
 
     client.upload_file(local_path, bucket, key, ExtraArgs=extra_args or None)
 
-    # We store and return only the S3 object key (prefix/filename), not a public URL.
+    # We store and return only the S3 object key, not a public URL.
     return key
 
 
-async def upload_file_to_s3(local_path: str) -> Optional[str]:
+async def upload_file_to_s3(
+    local_path: str,
+    postfix: Optional[str] = None,
+) -> Optional[str]:
     """
     Asynchronously upload a local file to S3/MinIO and return its object key.
 
@@ -90,7 +100,9 @@ async def upload_file_to_s3(local_path: str) -> Optional[str]:
     """
     try:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, _upload_file_to_s3_sync, local_path)
+        return await loop.run_in_executor(
+            None, _upload_file_to_s3_sync, local_path, postfix
+        )
     except Exception as e:
         print(f"Error uploading file to S3: {e}")
         return None

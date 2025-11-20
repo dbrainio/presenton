@@ -76,7 +76,11 @@ class ImageGenerationService:
                 elif os.path.exists(image_path):
                     # For locally generated images, upload to S3/MinIO (when configured)
                     # and return an ImageAsset that keeps both the local path and S3 key.
-                    s3_key = await upload_file_to_s3(image_path)
+                    s3_key = await upload_file_to_s3(
+                        image_path,
+                        # Use a generic postfix so S3 keys can still be grouped by presentation
+                        postfix=prompt.presentation_id,
+                    )
                     if not s3_key:
                         raise Exception("Failed to upload generated image to S3")
                     print(f"Image uploaded to S3: {s3_key}")

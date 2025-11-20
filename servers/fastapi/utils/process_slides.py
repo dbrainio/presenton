@@ -25,6 +25,8 @@ async def process_slide_and_fetch_assets(
             image_generation_service.generate_image(
                 ImagePrompt(
                     prompt=__image_prompt__parent["__image_prompt__"],
+                    # Pass presentation ID so S3 keys can be grouped per presentation
+                    presentation_id=str(slide.presentation),
                 )
             )
         )
@@ -59,9 +61,15 @@ async def process_slide_and_fetch_assets(
 
 async def process_old_and_new_slides_and_fetch_assets(
     image_generation_service: ImageGenerationService,
-    old_slide_content: dict,
+    slide: SlideModel,
     new_slide_content: dict,
 ) -> List[ImageAsset]:
+    """
+    Compare the old and new slide contents, reusing assets where possible and
+    generating new ones where prompts/queries changed.
+    """
+    old_slide_content = slide.content
+
     # Finds all old images
     old_image_dict_paths = get_dict_paths_with_key(
         old_slide_content, "__image_prompt__"
@@ -119,6 +127,8 @@ async def process_old_and_new_slides_and_fetch_assets(
             image_generation_service.generate_image(
                 ImagePrompt(
                     prompt=new_image["__image_prompt__"],
+                    # Keep grouping by the same presentation in S3
+                    presentation_id=str(slide.presentation),
                 )
             )
         )
