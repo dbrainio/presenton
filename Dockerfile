@@ -51,11 +51,15 @@ WORKDIR /app
 COPY servers/fastapi/ ./servers/fastapi/
 COPY start.js LICENSE NOTICE ./
 
+# Copy user config generator script
+COPY scripts/generate-userconfig.sh /app/scripts/generate-userconfig.sh
+RUN chmod +x /app/scripts/generate-userconfig.sh
+
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/nginx.conf
 
 # Expose the port
 EXPOSE 80
 
-# Start the servers
-CMD ["node", "/app/start.js"]
+# Start the servers (generate user config first)
+CMD ["sh", "-lc", "/app/scripts/generate-userconfig.sh && exec node /app/start.js"]

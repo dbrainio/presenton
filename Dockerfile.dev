@@ -68,11 +68,15 @@ RUN pip install aiohttp aiomysql aiosqlite asyncpg fastapi[standard] \
 #   cat /tmp/constraints.txt && \
 #   pip install --no-cache-dir --default-timeout=100 -c /tmp/constraints.txt docling
 
+# Copy user config generator script
+COPY scripts/generate-userconfig.sh /app/scripts/generate-userconfig.sh
+RUN chmod +x /app/scripts/generate-userconfig.sh
+
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/nginx.conf
 
 # Expose the port
 EXPOSE 80
 
-# Start the servers
-CMD ["node", "/app/start.js", "--dev"]
+# Start the servers (generate user config first)
+CMD ["sh", "-lc", "/app/scripts/generate-userconfig.sh && exec node /app/start.js --dev"]
